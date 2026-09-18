@@ -1,4 +1,4 @@
-# test_agent — AI Social Content Pipeline
+# Distributed Brand Team Simulation — AI Social Content Pipeline
 
 A 5-agent AI system that takes a product name and produces a brand-checked,
 ready-to-schedule Instagram post — caption, visual direction, and a pass/fail
