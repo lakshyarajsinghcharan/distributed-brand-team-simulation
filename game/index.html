@@ -1,0 +1,102 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Storm Royale</title>
+<style>html,body{margin:0;height:100%;background:#0b1020;overflow:hidden;touch-action:none;font-family:Arial,sans-serif}canvas{display:block}
+#ui{position:fixed;inset:0;pointer-events:none;color:#fff;font-weight:bold;text-shadow:0 0 4px #000}
+#hud{position:absolute;top:8px;left:8px;font-size:14px}#alive{position:absolute;top:8px;right:8px;font-size:18px;background:#000a;padding:6px 10px;border-radius:8px}
+.bar{width:180px;height:14px;background:#0008;border-radius:7px;margin-top:4px;overflow:hidden}.bar i{display:block;height:100%}
+#btn{position:absolute;right:30px;bottom:60px;display:flex;gap:14px;pointer-events:auto}
+#btn div{width:72px;height:72px;border-radius:50%;background:#ff7a1aaa;border:3px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;text-align:center}
+#build{background:#2e8bffaa}#overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0b1020e0;pointer-events:auto;text-align:center}
+#overlay h1{font-size:56px;margin:0;color:#ffd84a;letter-spacing:3px}#overlay p{font-size:18px;max-width:320px}
+#overlay button{font-size:22px;padding:14px 40px;border-radius:30px;border:0;background:#ffd84a;font-weight:bold}</style></head><body>
+<canvas id="c"></canvas>
+<div id="ui"><div id="hud"><div id="wpn">Pickaxe</div><div class="bar"><i id="hp" style="background:#3ddc5c;width:100%"></i></div><div class="bar"><i id="sh" style="background:#2e8bff;width:0%"></i></div><div id="mats" style="margin-top:4px">Wood: 0</div><div id="storm"></div></div>
+<div id="alive">100 ALIVE</div><div id="btn"><div id="build">BUILD<br>WALL</div><div id="fire">FIRE</div></div>
+<div id="overlay"><h1>STORM ROYALE</h1><p>100 drop in. Loot weapons &amp; shields, build walls, outlast the storm. Last one standing wins the Victory Royale!</p><p style="font-size:13px">Left side: drag to move · Right side: drag to aim</p><button id="play">DROP IN</button></div></div>
+<script>
+const C=document.getElementById('c'),X=C.getContext('2d');let W,H;const R=()=>{W=C.width=innerWidth;H=C.height=innerHeight};addEventListener('resize',R);R();
+const MAP=3000,TILE=100,rnd=(a,b)=>a+Math.random()*(b-a),dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const WEAPONS={pickaxe:{dmg:20,rate:500,range:60,col:'#aaa',spd:0},pistol:{dmg:24,rate:300,range:500,col:'#bbb',spd:14},smg:{dmg:14,rate:100,range:450,col:'#5f5',spd:14},shotgun:{dmg:70,rate:900,range:220,col:'#f55',spd:12},ar:{dmg:30,rate:180,range:700,col:'#5af',spd:16},sniper:{dmg:110,rate:1400,range:1200,col:'#fd5',spd:28}};
+const RAR=['#bbb','#5f5','#5af','#c5f','#fd5'];
+let P,bots,bullets,loot,walls,trees,rocks,houses,storm,t0,alive,phase,tick=0,msg='',msgT=0,win=false;
+function newEnt(x,y){return{x,y,hp:100,sh:0,w:'pickaxe',a:0,last:0,wood:0,dead:false,col:`hsl(${rnd(0,360)},70%,55%)`}}
+function init(){P=newEnt(rnd(300,MAP-300),rnd(300,MAP-300));P.col='#ffd84a';bots=[];for(let i=0;i<99;i++){const b=newEnt(rnd(200,MAP-200),rnd(200,MAP-200));b.w=['pistol','smg','ar','shotgun'][i%4];b.tgt=null;b.think=0;b.drop=true;bots.push(b)}
+P.drop=true;bullets=[];walls=[];trees=[];rocks=[];houses=[];loot=[];
+for(let i=0;i<260;i++)trees.push({x:rnd(0,MAP),y:rnd(0,MAP),hp:60});for(let i=0;i<60;i++)rocks.push({x:rnd(0,MAP),y:rnd(0,MAP),r:rnd(18,40)});
+for(let i=0;i<30;i++){const h={x:rnd(100,MAP-300),y:rnd(100,MAP-300),w:rnd(140,260),h:rnd(140,220),col:`hsl(${rnd(0,50)},40%,${rnd(45,65)}%)`};houses.push(h);for(let k=0;k<3;k++)loot.push(mkLoot(h.x+rnd(10,h.w-10),h.y+rnd(10,h.h-10)))}
+for(let i=0;i<120;i++)loot.push(mkLoot(rnd(0,MAP),rnd(0,MAP)));
+storm={x:MAP/2,y:MAP/2,r:MAP*0.8,tx:MAP/2,ty:MAP/2,tr:MAP*0.8,next:0,phase:0,wait:true};alive=100;t0=performance.now();win=false;phase=1}
+function mkLoot(x,y){const r=Math.random();if(r<0.3)return{x,y,k:'shield',col:'#2e8bff'};if(r<0.4)return{x,y,k:'med',col:'#3ddc5c'};const ws=['pistol','smg','shotgun','ar','sniper'];const w=ws[Math.floor(Math.random()*ws.length)];return{x,y,k:w,col:RAR[ws.indexOf(w)]}}
+// input
+let joy={id:null,sx:0,sy:0,dx:0,dy:0},aim={id:null,sx:0,sy:0,dx:0,dy:0},firing=false,keys={},mouse=null;
+function pd(e){for(const t of e.changedTouches){if(t.clientX<W/2&&joy.id===null){joy.id=t.identifier;joy.sx=t.clientX;joy.sy=t.clientY;joy.dx=joy.dy=0}else if(aim.id===null){aim.id=t.identifier;aim.sx=t.clientX;aim.sy=t.clientY;aim.dx=aim.dy=0}}}
+function pm(e){for(const t of e.changedTouches){if(t.identifier===joy.id){joy.dx=t.clientX-joy.sx;joy.dy=t.clientY-joy.sy}else if(t.identifier===aim.id){aim.dx=t.clientX-aim.sx;aim.dy=t.clientY-aim.sy;if(Math.hypot(aim.dx,aim.dy)>10)P.a=Math.atan2(aim.dy,aim.dx)}}}
+function pu(e){for(const t of e.changedTouches){if(t.identifier===joy.id)joy.id=null;if(t.identifier===aim.id)aim.id=null}}
+C.addEventListener('touchstart',e=>{e.preventDefault();pd(e)},{passive:false});C.addEventListener('touchmove',e=>{e.preventDefault();pm(e)},{passive:false});C.addEventListener('touchend',pu);C.addEventListener('touchcancel',pu);
+const fb=document.getElementById('fire'),bb=document.getElementById('build');fb.addEventListener('touchstart',e=>{e.preventDefault();firing=true});fb.addEventListener('touchend',()=>firing=false);bb.addEventListener('touchstart',e=>{e.preventDefault();buildWall(P)});
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=1;if(e.key==='q')buildWall(P)});addEventListener('keyup',e=>keys[e.key.toLowerCase()]=0);
+C.addEventListener('mousemove',e=>{mouse={x:e.clientX,y:e.clientY};P.a=Math.atan2(e.clientY-H/2,e.clientX-W/2)});C.addEventListener('mousedown',()=>firing=true);C.addEventListener('mouseup',()=>firing=false);
+function buildWall(e){if(e.wood<10)return;e.wood-=10;walls.push({x:e.x+Math.cos(e.a)*50,y:e.y+Math.sin(e.a)*50,a:e.a,hp:150,own:e})}
+function shoot(e,now){const w=WEAPONS[e.w];if(now-e.last<w.rate)return;e.last=now;if(e.w==='pickaxe'){const tx=e.x+Math.cos(e.a)*45,ty=e.y+Math.sin(e.a)*45;for(const t of trees)if(Math.hypot(t.x-tx,t.y-ty)<40){t.hp-=20;e.wood+=10;if(t.hp<=0)trees.splice(trees.indexOf(t),1);return}
+for(const o of[...bots,P])if(o!==e&&!o.dead&&Math.hypot(o.x-tx,o.y-ty)<30)hit(o,w.dmg,e);return}
+const n=e.w==='shotgun'?5:1;for(let i=0;i<n;i++){const a=e.a+(n>1?rnd(-.2,.2):rnd(-.04,.04));bullets.push({x:e.x,y:e.y,vx:Math.cos(a)*w.spd,vy:Math.sin(a)*w.spd,d:w.dmg,own:e,life:w.range/w.spd,col:w.col})}}
+function hit(o,d,by){if(o.sh>0){const s=Math.min(o.sh,d);o.sh-=s;d-=s}o.hp-=d;if(o.hp<=0&&!o.dead){o.dead=true;alive--;loot.push({x:o.x,y:o.y,k:o.w==='pickaxe'?'shield':o.w,col:'#fff'});if(by===P){P.elims=(P.elims||0)+1;say('Eliminated! '+alive+' left')}}}
+function say(s){msg=s;msgT=120}
+function update(now){const dt=1;tick++;
+if(storm.wait&&now-t0>20000){storm.wait=false;storm.next=now;shrink(now)}
+if(!storm.wait){const k=0.0012;storm.r+=(storm.tr-storm.r)*k*3;storm.x+=(storm.tx-storm.x)*k*3;storm.y+=(storm.ty-storm.y)*k*3;if(Math.abs(storm.r-storm.tr)<5&&now-storm.next>12000)shrink(now)}
+// player move
+let mx=0,my=0;if(joy.id!==null){const m=Math.min(1,Math.hypot(joy.dx,joy.dy)/50);const a=Math.atan2(joy.dy,joy.dx);mx=Math.cos(a)*m;my=Math.sin(a)*m}
+mx+=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0);my+=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);
+const sp=P.drop?9:4.5;move(P,mx*sp,my*sp);if(P.drop&&(Math.hypot(mx,my)<.1&&now-t0>3000||now-t0>8000)){P.drop=false;say('Landed! Find loot')}
+if((firing||keys[' ']||keys.f)&&!P.drop&&!P.dead)shoot(P,now);
+if(!P.drop)for(let i=loot.length-1;i>=0;i--){const l=loot[i];if(dist(l,P)<28){pick(P,l);loot.splice(i,1)}}
+// bots
+for(const b of bots){if(b.dead)continue;if(b.drop){b.drop=now-t0>rnd(2000,9000)?false:true;continue}
+if(tick%20===0){b.tgt=null;let bd=600;for(const o of[...bots,P])if(o!==b&&!o.dead&&!o.drop){const d=dist(o,b);if(d<bd){bd=d;b.tgt=o}}
+const ds=dist(b,storm);if(ds>storm.r-150){b.mv=Math.atan2(storm.y-b.y,storm.x-b.x)}else if(b.tgt){b.mv=Math.atan2(b.tgt.y-b.y,b.tgt.x-b.x)+(bd<200?Math.PI/2*(Math.random()<.5?1:-1):0)}else if(Math.random()<.3)b.mv=rnd(0,7);
+if(b.tgt&&bd<200&&b.wood>=10&&Math.random()<.2)buildWall(b);
+for(let i=loot.length-1;i>=0;i--)if(dist(loot[i],b)<28){pick(b,loot[i]);loot.splice(i,1)}
+if(b.hp<50&&Math.random()<.02)b.hp=Math.min(100,b.hp+30);b.wood+=1}
+if(b.mv!==undefined)move(b,Math.cos(b.mv)*3.2,Math.sin(b.mv)*3.2);
+if(b.tgt){b.a=Math.atan2(b.tgt.y-b.y,b.tgt.x-b.x)+rnd(-.15,.15);if(dist(b,b.tgt)<WEAPONS[b.w].range*.8&&Math.random()<.5)shoot(b,now)}}
+// bullets
+for(let i=bullets.length-1;i>=0;i--){const b=bullets[i];b.x+=b.vx;b.y+=b.vy;b.life--;let gone=b.life<=0;
+for(const w of walls)if(Math.hypot(w.x-b.x,w.y-b.y)<40&&w.own!==b.own){w.hp-=b.d;if(w.hp<=0)walls.splice(walls.indexOf(w),1);gone=true;break}
+for(const r of rocks)if(Math.hypot(r.x-b.x,r.y-b.y)<r.r)gone=true;
+if(!gone)for(const o of[...bots,P])if(o!==b.own&&!o.dead&&!o.drop&&Math.hypot(o.x-b.x,o.y-b.y)<18){hit(o,b.d,b.own);gone=true;break}
+if(gone)bullets.splice(i,1)}
+// storm damage
+if(tick%30===0)for(const o of[...bots,P])if(!o.dead&&!o.drop&&dist(o,storm)>storm.r){o.hp-=storm.phase>3?5:2;if(o.hp<=0&&!o.dead){o.dead=true;alive--}}
+if(P.dead&&!win)end(false);else if(alive===1&&!P.dead&&!win)end(true);
+// hud
+document.getElementById('hp').style.width=Math.max(0,P.hp)+'%';document.getElementById('sh').style.width=P.sh+'%';document.getElementById('wpn').textContent=P.w.toUpperCase();
+document.getElementById('mats').textContent='Wood: '+P.wood;document.getElementById('alive').textContent=alive+' ALIVE  ·  '+(P.elims||0)+' elims';
+document.getElementById('storm').textContent=storm.wait?'Storm forms in '+Math.ceil((20000-(now-t0))/1000)+'s':dist(P,storm)>storm.r?'⚠ IN STORM':'Storm shrinking';if(msgT>0)msgT--}
+function shrink(now){storm.phase++;storm.tr=storm.r*0.6;const o=storm.r*0.3;storm.tx=storm.x+rnd(-o,o);storm.ty=storm.y+rnd(-o,o);storm.next=now;say('Storm is closing in')}
+function pick(e,l){if(l.k==='shield')e.sh=Math.min(100,e.sh+50);else if(l.k==='med')e.hp=Math.min(100,e.hp+50);else if(e===P||WEAPONS[l.k].dmg*1000/WEAPONS[l.k].rate>WEAPONS[e.w].dmg*1000/WEAPONS[e.w].rate){e.w=l.k;if(e===P)say('Picked up '+l.k)}}
+function move(e,dx,dy){let nx=e.x+dx,ny=e.y+dy;for(const r of rocks)if(Math.hypot(r.x-nx,r.y-ny)<r.r+12){nx=e.x;ny=e.y}for(const w of walls)if(Math.hypot(w.x-nx,w.y-ny)<34&&w.own!==e){nx=e.x;ny=e.y}e.x=Math.max(10,Math.min(MAP-10,nx));e.y=Math.max(10,Math.min(MAP-10,ny))}
+function end(w){win=true;const o=document.getElementById('overlay');o.style.display='flex';o.querySelector('h1').textContent=w?'#1 VICTORY ROYALE':'ELIMINATED';o.querySelector('p').textContent=w?'You outlasted 99 opponents!':'You placed #'+(alive+1)+' with '+(P.elims||0)+' eliminations.';document.getElementById('play').textContent='PLAY AGAIN'}
+function draw(){const cx=P.x-W/2,cy=P.y-H/2;X.fillStyle='#4caf50';X.fillRect(0,0,W,H);X.save();X.translate(-cx,-cy);
+X.fillStyle='#43a047';for(let x=0;x<MAP;x+=TILE)for(let y=0;y<MAP;y+=TILE)if(((x+y)/TILE)%2===0&&x>cx-TILE&&x<cx+W&&y>cy-TILE&&y<cy+H)X.fillRect(x,y,TILE,TILE);
+X.fillStyle='#2b6cb0';X.fillRect(-300,-300,MAP+600,300);X.fillRect(-300,MAP,MAP+600,300);X.fillRect(-300,0,300,MAP);X.fillRect(MAP,0,300,MAP);
+for(const h of houses){if(h.x+h.w<cx||h.x>cx+W||h.y+h.h<cy||h.y>cy+H)continue;X.fillStyle=h.col;X.fillRect(h.x,h.y,h.w,h.h);X.fillStyle='#0003';X.fillRect(h.x+4,h.y+4,h.w-8,h.h-8);X.fillStyle='#8d6e63';X.fillRect(h.x+h.w/2-15,h.y+h.h-10,30,10)}
+for(const r of rocks){X.fillStyle='#78909c';X.beginPath();X.arc(r.x,r.y,r.r,0,7);X.fill()}
+for(const l of loot){if(Math.abs(l.x-P.x)>W||Math.abs(l.y-P.y)>H)continue;X.fillStyle=l.col;X.shadowColor=l.col;X.shadowBlur=12;X.fillRect(l.x-8,l.y-8,16,16);X.shadowBlur=0}
+for(const w of walls){X.save();X.translate(w.x,w.y);X.rotate(w.a+Math.PI/2);X.fillStyle='#a1887f';X.fillRect(-40,-6,80,12);X.strokeStyle='#5d4037';X.strokeRect(-40,-6,80,12);X.restore()}
+for(const t of trees){if(Math.abs(t.x-P.x)>W||Math.abs(t.y-P.y)>H)continue;X.fillStyle='#5d4037';X.fillRect(t.x-5,t.y,10,20);X.fillStyle='#2e7d32';X.beginPath();X.arc(t.x,t.y-8,22,0,7);X.fill()}
+for(const b of bullets){X.strokeStyle=b.col;X.lineWidth=3;X.beginPath();X.moveTo(b.x,b.y);X.lineTo(b.x-b.vx,b.y-b.vy);X.stroke()}
+for(const o of[...bots,P]){if(o.dead||Math.abs(o.x-P.x)>W||Math.abs(o.y-P.y)>H)continue;const s=o.drop?1.6:1;if(o.drop){X.fillStyle='#fff8';X.beginPath();X.arc(o.x,o.y-40*s,30*s,Math.PI,0);X.fill()}
+X.fillStyle='#0004';X.beginPath();X.ellipse(o.x,o.y+14,14,6,0,0,7);X.fill();X.fillStyle=o.col;X.fillRect(o.x-10*s,o.y-6*s,20*s,22*s);X.fillStyle='#ffcc80';X.beginPath();X.arc(o.x,o.y-14*s,10*s,0,7);X.fill();
+X.strokeStyle=WEAPONS[o.w].col;X.lineWidth=5;X.beginPath();X.moveTo(o.x,o.y);X.lineTo(o.x+Math.cos(o.a)*26,o.y+Math.sin(o.a)*26);X.stroke();
+if(o!==P){X.fillStyle='#000a';X.fillRect(o.x-16,o.y-34,32,4);X.fillStyle='#3ddc5c';X.fillRect(o.x-16,o.y-34,32*o.hp/100,4)}}
+// storm
+X.save();X.beginPath();X.rect(cx-10,cy-10,W+20,H+20);X.arc(storm.x,storm.y,storm.r,0,7,true);X.fillStyle='#7b1fa266';X.fill();X.restore();X.strokeStyle='#e040fb';X.lineWidth=4;X.beginPath();X.arc(storm.x,storm.y,storm.r,0,7);X.stroke();
+X.strokeStyle='#fff6';X.setLineDash([8,8]);X.beginPath();X.arc(storm.tx,storm.ty,storm.tr,0,7);X.stroke();X.setLineDash([]);X.restore();
+// minimap
+const ms=110,sc=ms/MAP;X.fillStyle='#000a';X.fillRect(W-ms-10,H-ms-10,ms,ms);X.fillStyle='#4caf50';X.fillRect(W-ms-10,H-ms-10,ms,ms);X.strokeStyle='#e040fb';X.lineWidth=2;X.beginPath();X.arc(W-ms-10+storm.x*sc,H-ms-10+storm.y*sc,storm.r*sc,0,7);X.stroke();X.fillStyle='#ffd84a';X.fillRect(W-ms-10+P.x*sc-3,H-ms-10+P.y*sc-3,6,6);
+if(joy.id!==null){X.strokeStyle='#fff8';X.lineWidth=3;X.beginPath();X.arc(joy.sx,joy.sy,50,0,7);X.stroke();X.fillStyle='#fffa';X.beginPath();X.arc(joy.sx+Math.max(-50,Math.min(50,joy.dx)),joy.sy+Math.max(-50,Math.min(50,joy.dy)),22,0,7);X.fill()}
+if(msgT>0){X.fillStyle='#ffd84a';X.font='bold 26px Arial';X.textAlign='center';X.fillText(msg,W/2,80)}
+if(P.drop){X.fillStyle='#fff';X.font='bold 20px Arial';X.textAlign='center';X.fillText('GLIDING – steer to pick a landing spot',W/2,H-40)}}
+let running=false;function loop(){if(running){update(performance.now());draw()}requestAnimationFrame(loop)}loop();
+document.getElementById('play').onclick=()=>{init();document.getElementById('overlay').style.display='none';running=true};
+</script></body></html>
